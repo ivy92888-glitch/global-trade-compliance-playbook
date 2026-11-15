@@ -104,6 +104,11 @@ global-trade-compliance-playbook/
 │   ├── 06_review_checklist.md   ← 复核资料 7 项清单 + 异议模板
 │   ├── 07_fundamentals.md       ← 术语速查 + 四大风控红线 + EORI 信用体系
 │   └── 08_policy_updates.md     ← 2025-2028 政策追踪（4 大政策）
+├── chatbot/                      ← 🤖 可直接运行的 RAG 智能客服
+│   ├── app.py                  ← Streamlit 前端（聊天界面）
+│   ├── rag.py                  ← RAG 管道（TF-IDF 检索 + LLM 流式生成）
+│   ├── config.py               ← LLM / 检索参数配置（环境变量）
+│   └── requirements.txt        ← 4 个轻依赖（streamlit / sklearn / requests / numpy）
 ├── examples/
 │   └── sample_country.md        ← 示例：如何为一个新国家补充 profile
 ├── LICENSE                       ← MIT
@@ -112,13 +117,91 @@ global-trade-compliance-playbook/
 
 ---
 
-## 快速使用
+## 🚀 5 分钟跑起智能客服
 
-### 直接阅读
+这是本项目最核心的交付物——**一个能直接运行的清关合规问答机器人**。零 LLM 模型下载（检索用 TF-IDF），只需配好 LLM API 端点就能跑。
 
-直接打开 `knowledge/` 下的 .md 文件。如果是第一次接触跨境清关，建议按文件编号顺序读。
+### 第一步：安装依赖（4 个轻量包）
 
-### 喂给 RAG 系统
+```bash
+pip install -r chatbot/requirements.txt
+```
+
+### 第二步：配置 LLM（三选一）
+
+#### 选项 A：本地 Ollama（完全免费、离线可用）
+
+```bash
+# 终端 1：启动 Ollama
+ollama serve
+
+# 终端 2：拉一个中文模型
+ollama pull qwen2.5
+```
+
+然后设置环境变量（或在 Streamlit 侧边栏里填）：
+```bash
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_MODEL=qwen2.5
+export LLM_API_KEY=ollama    # Ollama 不需要 key，填任意值即可
+```
+
+#### 选项 B：硅基流动 / OpenRouter（低成本、高质量）
+
+```bash
+export LLM_BASE_URL=https://api.siliconflow.cn/v1
+export LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
+export LLM_MODEL=deepseek-ai/DeepSeek-V3
+```
+
+#### 选项 C：OpenAI / DeepSeek / 通义千问（任选 OpenAI-compatible 端点）
+
+只要是符合 OpenAI `chat/completions` API 规范的端点都能用。
+
+### 第三步：启动
+
+```bash
+streamlit run chatbot/app.py
+```
+
+浏览器自动打开 `http://localhost:8501`，就能聊了。
+
+### 第四步：聊天
+
+直接问问题，比如：
+- "灯具推荐哪个渠道？比利时还是荷兰？"
+- "HS 编码能改吗？怎么发起异议？"
+- "查验费用一般多少钱？"
+- "陶瓷发欧盟有什么风险？"
+- "2026 年有哪些新规？"
+- "CBAM 碳关税怎么算？"
+
+**每个回答下面会显示 📚 参考来源**——告诉你答案来自哪个 knowledge 文件的哪个 section，方便你溯源验证。
+
+### 可选：用环境变量一次性配置
+
+不想每次在 Streamlit 侧边栏填？在 `.env` 或 shell 里设好就行：
+
+```bash
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_MODEL=qwen2.5
+export LLM_API_KEY=ollama
+export LLM_TOP_K=5
+```
+
+配置参数见 [chatbot/config.py](chatbot/config.py)。
+
+---
+
+## 其他使用方式
+
+### 直接阅读（团队新人 onboarding）
+
+直接打开 `knowledge/` 下的 .md 文件。如果是第一次接触跨境清关，建议按文件编号顺序读：第一天 overview + fundamentals，第二天 product matrix，第三天 review checklist。
+
+### 把知识喂给你自己的 RAG 系统
+
+本项目的 chatbot 是**轻量零下载方案**。如果你想用 LangChain / LlamaIndex / Dify / FastGPT 等完整框架，直接把 `knowledge/*.md` 全部加载进去就行：
 
 ```python
 # LangChain 示例
@@ -130,7 +213,17 @@ docs = loader.load()
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 splits = splitter.split_documents(docs)
 
-# 然后把 splits 存入你的向量库即可
+# 存入你的向量库即可
+```
+
+### 命令行测试 RAG 检索质量
+
+不调 LLM，只看检索对不对（调试/选 chunk size 时用）：
+
+```bash
+python chatbot/rag.py   # 进入交互模式，输入问题只检索不生成
+# 或
+python _test_rag.py     # 预设 6 个测试 query 看检索命中
 ```
 
 ### 补充新知识
