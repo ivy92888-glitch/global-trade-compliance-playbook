@@ -191,6 +191,20 @@ export LLM_TOP_K=5
 
 配置参数见 [chatbot/config.py](chatbot/config.py)。
 
+### 运行界面长这样
+
+| 首页 | 侧边栏展开 | 回答中（带参考来源） |
+|---|---|---|
+| ![home](docs/assets/chatbot-home.png) | ![sidebar](docs/assets/chatbot-home.png) | ![running](docs/assets/chatbot-running.png) |
+
+API Key 在侧边栏自动脱敏显示（星号），每个回答底部展示 📚 参考来源（具体到 knowledge/*.md 的哪个章节）。
+
+---
+
+## 培训文档
+
+如果你是第一次接触 Streamlit / RAG，或者想把这套智能客服搭给自己的团队——**[智能客服操作手册](智能客服操作手册.docx)** 覆盖了从注册硅基流动 → 充值 → 启动 → 常见问题排查的完整流程，带真实截图。
+
 ---
 
 ## 其他使用方式
