@@ -1,6 +1,6 @@
 # 📚 Global Trade Compliance Playbook
 
-> 跨境清关合规知识手册——给客服机器人当 RAG 语料，给跨境新人当 onboarding 教材
+> 跨境合规知识手册——给客服机器人当 RAG 语料，给跨境新人当 onboarding 教材
 
 ---
 
