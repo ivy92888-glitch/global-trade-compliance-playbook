@@ -1,51 +1,56 @@
 """
-Global Trade Compliance Assistant — 多地区跨境物流合规助手
+Global Trade Compliance Assistant — 5 地区 × 9 节点 跨境物流合规问答
 
 支持地区：欧洲 / 英国 / 美国 / 加拿大 / 东南亚
-覆盖：进出口申报、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪
+支持节点：港前 / 装柜 / 订舱 / 报关 / 投保 / 清关 / 港后 / 理赔 / 财务
 """
-import os, sys, time
+import os, sys
 import streamlit as st
 
-# 确保能导入 rag
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rag import RAGChatbot, REGIONS
+from rag import RAGChatbot, REGIONS, NODES
 
 # ========== 页面配置 ==========
-st.set_page_config(
-    page_title="Global Trade Compliance Assistant",
-    page_icon="📦",
-    layout="wide",
-)
+st.set_page_config(page_title="Global Trade Assistant", page_icon="📦", layout="wide")
 
 # ========== 状态初始化 ==========
 def get_base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 if "chatbot" not in st.session_state:
-    st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), region="europe")
+    st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), region="europe", node="all")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ========== 侧边栏 ==========
 with st.sidebar:
-    st.title("📦 Global Trade Compliance Assistant")
-    st.caption("跨境物流合规问答助手")
+    st.title("📦 Global Trade Assistant")
+    st.caption("跨境物流问答助手")
     
-    # 地区选择 —— 删 emoji 图标，只保留中文地区名
+    # 地区选择
     st.subheader("选择地区")
-    region_labels = [REGIONS[r]["label"].split()[-1] for r in REGIONS]  # 只取最后一个词（欧洲/英国/...）
     region_keys = list(REGIONS.keys())
-    current_label = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])["label"].split()[-1]
+    region_labels = [REGIONS[r]["label"] for r in region_keys]
+    current_region_label = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])["label"]
+    region_idx = region_labels.index(current_region_label) if current_region_label in region_labels else 0
+    selected_region_label = st.radio("地区", region_labels, index=region_idx, key="region_radio")
+    selected_region = region_keys[region_labels.index(selected_region_label)]
     
-    selected_idx = region_labels.index(current_label) if current_label in region_labels else 0
-    selected_label = st.radio("地区", region_labels, index=selected_idx)
-    selected_region = region_keys[region_labels.index(selected_label)]
+    # 节点选择（新增）
+    st.subheader("选择节点")
+    node_keys = list(NODES.keys())
+    node_labels = [NODES[n]["label"] for n in node_keys]
+    current_node_label = NODES.get(st.session_state.chatbot.node, NODES["all"])["label"]
+    node_idx = node_labels.index(current_node_label) if current_node_label in node_labels else 0
+    selected_node_label = st.radio("节点", node_labels, index=node_idx, key="node_radio")
+    selected_node = node_keys[node_labels.index(selected_node_label)]
     
-    if selected_region != st.session_state.chatbot.region:
-        st.session_state.chatbot.switch_region(selected_region)
+    # 检测切换
+    if selected_region != st.session_state.chatbot.region or selected_node != st.session_state.chatbot.node:
+        st.session_state.chatbot.switch_context(region=selected_region, node=selected_node)
         st.session_state.messages = []
-        st.success(f"已切换到 {selected_label}，知识库 {len(st.session_state.chatbot.chunks)} 条")
+        status = st.session_state.chatbot.get_status()
+        st.success(f"已切换 → {status['region']} · {status['node']}，知识库 {status['chunks']} 条")
         st.rerun()
     
     st.divider()
@@ -59,7 +64,6 @@ with st.sidebar:
             value=os.environ.get("LLM_API_KEY", ""), type="password")
         model = st.text_input("Model", 
             value=os.environ.get("LLM_MODEL", "deepseek-ai/DeepSeek-V3"))
-        
         os.environ["LLM_BASE_URL"] = base_url
         os.environ["LLM_API_KEY"] = api_key
         os.environ["LLM_MODEL"] = model
@@ -71,19 +75,19 @@ with st.sidebar:
     st.session_state.chatbot.top_k = top_k
     
     st.divider()
-    st.caption("TF-IDF char n-gram 检索 + 自定义 prompt，RAG 架构")
-    st.caption("仅基于公开合规常识，不提供规避建议")
+    st.caption("TF-IDF char n-gram · RAG 架构")
 
 # ========== 主区域 ==========
-region_info = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])
-region_label = region_info["label"].split()[-1]  # 只取中文地区名
+status = st.session_state.chatbot.get_status()
+scope = f"{status['region']}"
+if status['node'] != "全部节点":
+    scope += f" · {status['node']}"
 
-st.title(f"📦 {region_label} 跨境物流合规助手")
-st.caption(f"知识库 {len(st.session_state.chatbot.chunks)} 条 · 进出口申报合规 · VAT 递延 · 产品认证 · 政策新规 · 查验应对")
+st.title(f"📦 {scope} 跨境物流助手")
+st.caption(f"知识库 {status['chunks']} 条 · 进出口申报 · VAT 递延 · 查验应对 · 产品认证 · 风控合规")
 
-# 欢迎语 —— 简化
 if not st.session_state.messages:
-    st.info("👋 你好！我是跨境物流合规助手。覆盖进出口申报、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪等环节。")
+    st.info("👋 你好！我是跨境物流助手。选择地区和节点后，提问更精准；默认覆盖全部 9 个运营节点。")
 
 # ========== 对话历史 ==========
 for msg in st.session_state.messages:
@@ -100,23 +104,18 @@ if prompt := st.chat_input("提问..."):
     with st.chat_message("user"):
         st.write(prompt)
     
-    # 检索
     with st.spinner("检索知识库..."):
         retrieved = st.session_state.chatbot.retrieve(prompt)
     
-    # 生成回答
     with st.chat_message("assistant"):
         try:
             stream = st.session_state.chatbot.stream_llm(prompt, retrieved=retrieved)
-            
-            # 流式显示
             full_response = ""
             placeholder = st.empty()
             for chunk in stream:
                 full_response += chunk
                 placeholder.markdown(full_response)
             
-            # 显示来源
             sources = list(set(f"来源: {src} (相关度 {score:.2f})" 
                              for _, src, score in retrieved if score > 0.08))
             if sources:
@@ -125,15 +124,7 @@ if prompt := st.chat_input("提问..."):
                         st.write(s)
             
             placeholder.markdown(full_response)
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": full_response,
-                "sources": sources
-            })
-            
+            st.session_state.messages.append({"role": "assistant", "content": full_response, "sources": sources})
         except Exception as e:
             st.error(f"出错了：{str(e)}")
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": f"抱歉，调用 LLM 时出错：{str(e)}"
-            })
+            st.session_state.messages.append({"role": "assistant", "content": f"抱歉，调用 LLM 时出错：{str(e)}"})
