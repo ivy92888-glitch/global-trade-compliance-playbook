@@ -33,8 +33,12 @@ NODES = {
 class RAGChatbot:
     def __init__(self, base_dir=".", region="europe", node=None, top_k=5):
         self.base_dir = base_dir
+        # 过滤掉已删除的 "all" 等无效节点
+        if node and node in NODES:
+            self.node = node
+        else:
+            self.node = None
         self.region = region
-        self.node = node  # None 表示选地区；非 None 表示选节点（二选一）
         self.top_k = top_k
         self.chunks = []
         self.sources = []
@@ -102,9 +106,6 @@ class RAGChatbot:
         import os, json
         if retrieved is None:
             retrieved = self.retrieve(query)
-        
-        region_info = REGIONS.get(self.region, REGIONS["europe"])
-        node_info = NODES.get(self.node, NODES["all"])
         
         context_parts = []
         for i, (chunk, source, score) in enumerate(retrieved):
