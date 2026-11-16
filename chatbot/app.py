@@ -13,8 +13,19 @@ st.set_page_config(page_title="Global Trade Assistant", page_icon="📦", layout
 def get_base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-if "chatbot" not in st.session_state:
-    st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), region="europe", node=None)
+# 强制重建 chatbot（确保过滤掉旧的 node="all" 等无效状态）
+old_node = st.session_state.get("chatbot", None)
+if old_node is not None:
+    old_n = getattr(old_node, "node", None)
+    old_r = getattr(old_node, "region", "europe")
+else:
+    old_n = None; old_r = "europe"
+
+# 如果旧 node 无效（被删了），清空
+if old_n is not None and old_n not in NODES:
+    old_n = None
+
+st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), region=old_r, node=old_n)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
