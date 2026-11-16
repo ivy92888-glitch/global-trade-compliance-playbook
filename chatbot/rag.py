@@ -1,5 +1,5 @@
 """
-RAG 检索增强生成模块 — 支持多地区知识库
+RAG 检索增强生成模块 — 支持 5 地区 × 9 节点 交叉检索
 """
 import os, re, glob
 import numpy as np
@@ -7,29 +7,35 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
 
-# 地区配置
+# ========== 5 地区配置 ==========
 REGIONS = {
-    "europe": {"label": "🇪🇺 欧洲清关", "dir": "knowledge/europe", "prompt_suffix": "（欧洲清关语境）"},
-    "uk": {"label": "🇬🇧 英国清关", "dir": "knowledge/uk", "prompt_suffix": "（英国清关语境）"},
-    "us": {"label": "🇺🇸 美国清关", "dir": "knowledge/us", "prompt_suffix": "（美国清关语境）"},
-    "canada": {"label": "🇨🇦 加拿大清关", "dir": "knowledge/canada", "prompt_suffix": "（加拿大清关语境）"},
-    "sea": {"label": "🌏 东南亚清关", "dir": "knowledge/sea", "prompt_suffix": "（东南亚清关语境）"},
+    "europe": {"label": "欧洲", "dir": "knowledge/europe", "hint": "欧盟/EORI/VAT递延/鹿特丹/CBAM"},
+    "uk": {"label": "英国", "dir": "knowledge/uk", "hint": "英国/IEN/PVA/C88/DPD/菲利克斯托"},
+    "us": {"label": "美国", "dir": "knowledge/us", "hint": "美国/ACE/ISF/HTS/FDA/洛杉矶港"},
+    "canada": {"label": "加拿大", "dir": "knowledge/canada", "hint": "加拿大/B3/CBSA/HS/温哥华"},
+    "sea": {"label": "东南亚", "dir": "knowledge/sea", "hint": "东南亚/新加坡/曼谷/巴生港"},
 }
 
-# 地区对应的语言/术语偏好
-REGION_HINTS = {
-    "europe": "欧盟 (EU) / MRN / EORI / VAT 递延 / 鹿特丹 / 安特卫普 / CBAM",
-    "uk": "英国 (UK) / IEN / PVA / C88 / DPD / 菲利克斯托 / 南安普顿",
-    "us": "美国 (US) / ACE / ISF / HTS / FDA / 洛杉矶港 / 纽约港",
-    "canada": "加拿大 (CA) / B3 / CBSA / HS / 温哥华 / 多伦多",
-    "sea": "东南亚 (SEA) / 新加坡 / 曼谷 / 雅加达 / 巴生港",
+# ========== 9 节点配置 ==========
+NODES = {
+    "all":               {"label": "全部节点", "dir": None},
+    "pre-shipment":      {"label": "港前",     "dir": "knowledge/nodes/pre-shipment"},
+    "loading":           {"label": "装柜",     "dir": "knowledge/nodes/loading"},
+    "booking":            {"label": "订舱",     "dir": "knowledge/nodes/booking"},
+    "customs-declaration":{"label": "报关",     "dir": "knowledge/nodes/customs-declaration"},
+    "insurance":          {"label": "投保",     "dir": "knowledge/nodes/insurance"},
+    "clearance":          {"label": "清关",     "dir": "knowledge/nodes/clearance"},
+    "post-harbor":        {"label": "港后",     "dir": "knowledge/nodes/post-harbor"},
+    "claims":             {"label": "理赔",     "dir": "knowledge/nodes/claims"},
+    "finance":            {"label": "财务",     "dir": "knowledge/nodes/finance"},
 }
 
 
 class RAGChatbot:
-    def __init__(self, base_dir=".", region="europe", top_k=5):
+    def __init__(self, base_dir=".", region="europe", node="all", top_k=5):
         self.base_dir = base_dir
         self.region = region
+        self.node = node
         self.top_k = top_k
         self.chunks = []
         self.sources = []
@@ -37,83 +43,89 @@ class RAGChatbot:
         self.tfidf_matrix = None
         self._load_knowledge()
 
-    def _load_knowledge(self):
-        """加载指定地区的所有知识文件"""
-        region_info = REGIONS.get(self.region, REGIONS["europe"])
-        kb_dir = os.path.join(self.base_dir, region_info["dir"])
-        
+    def _scan_dir(self, kb_dir, tag_prefix=""):
+        """扫描一个目录，返回 (chunks, sources)"""
+        chunks, sources = [], []
         if not os.path.exists(kb_dir):
-            self.chunks = ["知识库尚未就绪，敬请期待。"]
-            self.vectorizer = TfidfVectorizer()
-            self.tfidf_matrix = self.vectorizer.fit_transform(self.chunks)
-            return
-
+            return chunks, sources
+        
         files = sorted(glob.glob(os.path.join(kb_dir, "*.md")))
-        self.chunks = []
-        self.sources = []
-
         for fpath in files:
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
             fname = os.path.basename(fpath)
+            label = f"{tag_prefix}/{fname}" if tag_prefix else fname
             
-            # 按 ## 标题拆 chunk
             sections = re.split(r'\n(?=## )', content)
             for sec in sections:
                 sec = sec.strip()
-                if len(sec) > 30:  # 跳过太短的
-                    self.chunks.append(sec)
-                    self.sources.append(f"{fname}")
+                if len(sec) > 30:
+                    chunks.append(sec)
+                    sources.append(label)
+        return chunks, sources
 
-        # 构建 TF-IDF
+    def _load_knowledge(self):
+        """同时加载地区 + 节点知识库"""
+        all_chunks, all_sources = [], []
+        
+        # 地区知识库
+        region_info = REGIONS.get(self.region, REGIONS["europe"])
+        c, s = self._scan_dir(os.path.join(self.base_dir, region_info["dir"]), region_info["label"])
+        all_chunks.extend(c); all_sources.extend(s)
+        
+        # 节点知识库
+        node_info = NODES.get(self.node, NODES["all"])
+        if node_info["dir"]:
+            c, s = self._scan_dir(os.path.join(self.base_dir, node_info["dir"]), node_info["label"])
+            all_chunks.extend(c); all_sources.extend(s)
+        
+        self.chunks = all_chunks
+        self.sources = all_sources
+        
         if self.chunks:
-            self.vectorizer = TfidfVectorizer(
-                analyzer='char', ngram_range=(2, 4), min_df=1
-            )
+            self.vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 4), min_df=1)
             self.tfidf_matrix = self.vectorizer.fit_transform(self.chunks)
+        else:
+            self.vectorizer = None
+            self.tfidf_matrix = None
 
     def retrieve(self, query, k=None):
-        """检索 top-k 相关 chunk"""
         if not self.chunks or self.vectorizer is None:
             return [], []
-        
         k = k or self.top_k
         query_vec = self.vectorizer.transform([query])
         sims = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
         top_idx = sims.argsort()[-k:][::-1]
-        
-        results = [(self.chunks[i], self.sources[i], sims[i]) for i in top_idx if sims[i] > 0.05]
-        return results
+        return [(self.chunks[i], self.sources[i], sims[i]) for i in top_idx if sims[i] > 0.05]
 
     def stream_llm(self, query, retrieved=None, stream=True):
-        """调用 LLM（流式）"""
-        import os
-        
-        # 1. 检索
+        import os, json
         if retrieved is None:
             retrieved = self.retrieve(query)
         
-        # 2. 构建 prompt
         region_info = REGIONS.get(self.region, REGIONS["europe"])
-        region_hint = REGION_HINTS.get(self.region, "")
+        node_info = NODES.get(self.node, NODES["all"])
         
         context_parts = []
         for i, (chunk, source, score) in enumerate(retrieved):
             context_parts.append(f"[来源: {source}, 相关度: {score:.2f}]\n{chunk}")
+        context = "\n\n---\n\n".join(context_parts) if context_parts else "(知识库未检索到相关内容)"
         
-        context = "\n\n---\n\n".join(context_parts) if context_parts else "(知识库未检索到相关内容，以下为通用合规建议)"
+        # system prompt 同时体现地区 + 节点
+        scope_desc = f"{region_info['label']}方向"
+        if node_info["dir"]:
+            scope_desc += f" · {node_info['label']}环节"
         
-        system_prompt = f"""你是一位跨境物流合规专家，{region_info['label'].replace('🇪🇺 ','').replace('🇬🇧 ','').replace('🇺🇸 ','').replace('🇨🇦 ','').replace('🌏 ','')}方向。
-请基于以下知识库内容回答用户的跨境物流合规问题。
+        system_prompt = f"""你是一位跨境物流合规专家，专注于{scope_desc}的业务知识。
+请基于以下知识库内容回答用户的跨境物流问题。
 
 要求：
 1. 优先使用知识库中的信息，确保准确
-2. 如果知识库没有直接答案，基于通用跨境物流合规常识回答，并明确标注"以下为通用建议，具体请以当地海关最新政策为准"
+2. 如果知识库没有直接答案，基于通用跨境物流合规常识回答，并标注"以下为通用建议，具体请以当地最新政策为准"
 3. 给出的建议必须合规合法，不提供任何规避监管、少交税的操作建议
 4. 关键合规点（如申报真实、编码准确、认证齐全、追溯期长等）务必强调
 5. 回答结构清晰，分点列出
-
-术语参考：{region_hint}"""
+6. 涉及特定地区的问题，先说明该地区的特殊性，再给出通用建议"""
 
         user_prompt = f"""【知识库内容】
 
@@ -124,16 +136,12 @@ class RAGChatbot:
 
 请根据以上知识库内容，针对用户问题给出合规、准确、结构清晰的回答。"""
 
-        # 3. 调用 LLM
         base_url = os.environ.get("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
         api_key = os.environ.get("LLM_API_KEY", "")
         model = os.environ.get("LLM_MODEL", "deepseek-ai/DeepSeek-V3")
 
         url = f"{base_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         body = {
             "model": model,
             "messages": [
@@ -141,42 +149,49 @@ class RAGChatbot:
                 {"role": "user", "content": user_prompt},
             ],
             "stream": stream,
-            "max_tokens": 1500,
+            "max_tokens": 1800,
             "temperature": 0.3,
         }
 
         resp = requests.post(url, headers=headers, json=body, stream=True, timeout=120)
         if resp.status_code != 200:
             raise RuntimeError(f"LLM 调用失败 ({resp.status_code}): {resp.text[:500]}")
-
-        # 强制 UTF-8 解码（Windows GBK 兼容）
         resp.encoding = "utf-8"
 
         if stream:
             def gen():
-                buffer = ""
                 for line in resp.iter_lines(decode_unicode=True):
-                    if not line:
+                    if not line or not line.startswith("data: "):
                         continue
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        try:
-                            import json
-                            obj = json.loads(data)
-                            delta = obj.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except Exception:
-                            continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                        delta = obj.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except Exception:
+                        continue
             return gen()
         else:
-            import json
             return json.loads(resp.text)["choices"][0]["message"]["content"]
 
-    def switch_region(self, region):
-        """切换地区"""
-        self.region = region
+    def switch_context(self, region=None, node=None):
+        if region is not None: self.region = region
+        if node is not None: self.node = node
         self._load_knowledge()
+
+    def get_status(self):
+        region_info = REGIONS.get(self.region, REGIONS["europe"])
+        node_info = NODES.get(self.node, NODES["all"])
+        return {
+            "region": region_info["label"],
+            "node": node_info["label"],
+            "chunks": len(self.chunks),
+            "dir_count": len(set(
+                [region_info["dir"]] + 
+                ([node_info["dir"]] if node_info["dir"] else [])
+            )),
+        }
