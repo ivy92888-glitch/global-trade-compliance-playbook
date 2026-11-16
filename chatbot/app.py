@@ -1,31 +1,23 @@
 """
-Global Trade Assistant — 5 地区 × 9 节点 二选一模式
-知识库体量有限，选地区或节点其中一个提问
+Global Trade Assistant — 三选一模式：地区 / 节点 / 运输方式
+知识库体量有限，三选一加载，不同时选
 """
 import os, sys
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rag import RAGChatbot, REGIONS, NODES
+from rag import RAGChatbot, REGIONS, NODES, TRANSPORT
 
 st.set_page_config(page_title="Global Trade Assistant", page_icon="📦", layout="wide")
 
 def get_base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 强制重建 chatbot（确保过滤掉旧的 node="all" 等无效状态）
-old_node = st.session_state.get("chatbot", None)
-if old_node is not None:
-    old_n = getattr(old_node, "node", None)
-    old_r = getattr(old_node, "region", "europe")
-else:
-    old_n = None; old_r = "europe"
+# Force rebuild every load to filter stale state
+st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), mode="region", region="europe")
+st.session_state._prev_mode = "region"
+st.session_state._prev_key = "europe"
 
-# 如果旧 node 无效（被删了），清空
-if old_n is not None and old_n not in NODES:
-    old_n = None
-
-st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), region=old_r, node=old_n)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -33,35 +25,42 @@ with st.sidebar:
     st.title("📦 Global Trade Assistant")
     st.caption("跨境物流问答助手")
     
-    # ========== 二选一：地区 或 节点 ==========
     st.subheader("选择范围")
-    mode = st.radio("模式", ["按地区", "按节点"], index=0, key="mode_radio",
-                   label_visibility="collapsed")
+    mode_map = {"地区": "region", "节点": "node", "运输方式": "transport"}
+    mode_label = st.radio("范围", list(mode_map.keys()), index=0, key="mode_radio",
+                         label_visibility="collapsed")
+    mode = mode_map[mode_label]
     
-    changed = False
-    if mode == "按地区":
+    if mode == "region":
         region_keys = list(REGIONS.keys())
         region_labels = [REGIONS[r]["label"] for r in region_keys]
-        current_label = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])["label"]
-        idx = region_labels.index(current_label) if current_label in region_labels else 0
-        selected_label = st.radio("地区", region_labels, index=idx, key="region_radio")
-        selected_region = region_keys[region_labels.index(selected_label)]
-        if st.session_state.chatbot.node is not None or st.session_state.chatbot.region != selected_region:
-            st.session_state.chatbot.switch_context(region=selected_region)
-            changed = True
-    else:
+        selected_label = st.radio("地区", region_labels, index=0, key="region_radio")
+        selected_key = region_keys[region_labels.index(selected_label)]
+    elif mode == "node":
         node_keys = list(NODES.keys())
         node_labels = [NODES[n]["label"] for n in node_keys]
-        current = st.session_state.chatbot.node if st.session_state.chatbot.node in NODES else node_keys[0]
-        idx = node_keys.index(current)
-        selected_node_label = st.radio("节点", node_labels, index=idx, key="node_radio")
-        selected_node = node_keys[node_labels.index(selected_node_label)]
-        if st.session_state.chatbot.node != selected_node:
-            st.session_state.chatbot.switch_context(node=selected_node)
-            changed = True
+        selected_label = st.radio("节点", node_labels, index=0, key="node_radio")
+        selected_key = node_keys[node_labels.index(selected_label)]
+    else:
+        trans_keys = list(TRANSPORT.keys())
+        trans_labels = [TRANSPORT[t]["label"] for t in trans_keys]
+        selected_label = st.radio("运输方式", trans_labels, index=0, key="trans_radio")
+        selected_key = trans_keys[trans_labels.index(selected_label)]
     
-    if changed:
+    # Rebuild chatbot if changed
+    prev = st.session_state._prev_mode + ":" + st.session_state._prev_key
+    curr = mode + ":" + selected_key
+    if prev != curr:
         st.session_state.messages = []
+        st.session_state.chatbot = RAGChatbot(
+            base_dir=get_base_dir(),
+            mode=mode,
+            region=selected_key if mode == "region" else "europe",
+            node=selected_key if mode == "node" else None,
+            transport=selected_key if mode == "transport" else None,
+        )
+        st.session_state._prev_mode = mode
+        st.session_state._prev_key = selected_key
         status = st.session_state.chatbot.get_status()
         st.success(f"已切换 → {status['scope']}，知识库 {status['chunks']} 条")
         st.rerun()
@@ -82,7 +81,7 @@ with st.sidebar:
 st.title("📦 跨境物流助手")
 
 if not st.session_state.messages:
-    st.info("👋 你好！选择一个范围后提问。地区维度（如欧洲清关）或节点维度（如港后操作），二选一。")
+    st.info("👋 你好！左侧选一个范围（地区 / 节点 / 运输方式）后提问。")
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
