@@ -1,170 +1,332 @@
-# 📦 Global Trade Compliance Playbook
+# Global Trade Compliance Playbook
 
-跨境物流合规知识库 + 可运行的 RAG 问答助手。5 个地区知识体系，一键切换。
+## 跨境物流合规知识库 + 可运行的 RAG 问答助手
 
-**仓库地址：** https://github.com/ivy92888-glitch/global-trade-compliance-playbook
+你是一家跨境物流公司的新人客服，面对运单上的欧洲 VAT 递延申报、英国 IEN 码、美国 ACE 录入、加拿大 B3 报关、东南亚汽运清关……还有港前装柜、订舱、清关、港后派送这些节点上的各种问题，不知道去哪找答案。
+
+现在，打开一个浏览器窗口，选一个方向提问，知识库自动从几百页的跨境物流合规手册里翻出相关段落，帮你快速定位。
+
+> 原始知识库来自前公司职务作品，已做 clean-room 脱敏重写。10+ 份业务培训资料、覆盖 5 大地区、9 大操作节点、4 种运输方式。
 
 ---
 
-## ✨ 功能截图
+## 功能总览
 
-| 侧边栏（地区 + 节点双维度） | 主界面 |
+| 功能 | 人话总结 | 数字例子 |
+|---|---|---|
+| 知识检索 | 给你一段业务问题，自动从知识库里精准定位相关段落 | "灯具走欧洲哪个渠道？" → 命中欧洲清关 3 条 + 产品认证 2 条 |
+| 三选一范围 | 选地区、选节点、或选运输方式，知识库按需加载 | 节点"清关"= 173 条知识；运输"海运"= 4 条 |
+| RAG 问答 | 把检索到的段落喂给 LLM，生成结构化、合规的回答 | 每个回答下面显示参考来源和相关度 |
+| 一键启动 | Windows 双击 run.bat，浏览器自动打开 | 5 秒启动，零下载依赖 |
+
+---
+
+## 适用场景
+
+- **货代新人入职培训**：不用翻几百页 PDF，直接问"欧洲 VAT 递延怎么申报"
+- **清关岗日常查资料**：碰到异常单时快速查找对应环节的操作规范
+- **客服应对客户咨询**：客户问"我这票到英国走什么渠道清关最快"，秒答
+- **合规岗内部审核**：核对最新政策（CBAM/包装法/EUDR 等）
+
+---
+
+## 范围选择（三选一）
+
+### 地区（5 个）
+| 地区 | 核心内容 |
 |---|---|
-| <img src="docs/assets/chatbot-new-sidebar.png" width="280"/> | <img src="docs/assets/chatbot-new-home.png" width="420"/> |
+| 欧洲 | VAT 递延、EORI、CBAM、清关行评估、港清/监管仓 |
+| 英国 | IEN 码、PVA 申报、C88 文件、DPD 派送、2026 新规 |
+| 美国 | ACE/ISF 申报、HTS 编码、FDA/洛杉矶港 |
+| 加拿大 | B3 报关、CBSA、温哥华港 |
+| 东南亚 | 新加坡/曼谷/巴生港、跨境汽运清关 |
+
+### 操作节点（9 个）
+| 节点 | 内容 |
+|---|---|
+| 港前 | 收货验收、备货贴标 |
+| 装柜 | 排柜、贴标签、点数 |
+| 订舱 | 船期选择、托书制作、放舱 |
+| 报关 | 出口报关资料、AMS/ISF |
+| 投保 | 保险条款、理赔范围 |
+| 清关 | 清关行选择、查验应对、VAT 递延 |
+| 港后 | 海外仓系统、尾端入仓、派送 |
+| 理赔 | 货损索赔、保险流程 |
+| 财务 | 账单核对、费用结算 |
+
+### 运输方式（4 个）
+| 方式 | 内容 |
+|---|---|
+| 海运 | 航运联盟、船期、甩柜应对、时效 |
+| 空运 | 快线/慢线 SOP、分泡、DPD 派送 |
+| 卡航 | TIR 公约、中越/中欧线路、GPS 追踪 |
+| 铁路 | 中欧班列、换装、SMGS 运单 |
 
 ---
 
-## 🗂️ 双维度知识库（地区 × 节点）
+## 快速开始
 
-**问问题更精准：选「欧洲 + 清关」= 欧洲清关；选「港后」+ 地区可选 = 全地区港后通用知识。**
+### 前置条件
+- Windows / Mac / Linux（支持 Steamlit）
+- Python 3.10+
+- 一个 LLM API Key（硅基流动 / Ollama / OpenAI 都行）
 
-### 📍 9 个运营节点
+### Windows（双击 run.bat）
 
-| 节点 | 英文名 | 核心内容 |
-|------|--------|----------|
-| 港前 | pre-shipment | 揽收、地址校验、入仓预约 |
-| 装柜 | loading | 配载、柜型选择、装柜规范 |
-| 订舱 | booking | 船期、舱位确认、提单信息 |
-| 报关 | customs-declaration | 报关单制作、申报要素 |
-| 投保 | insurance | 保险方案、理赔流程 |
-| 清关 | clearance | 查验应对、VAT 递延、HS 编码、合规红线 |
-| 港后 | post-harbor | 海外仓入仓、尾端派送、系统操作 |
-| 理赔 | claims | 货损、延误、丢件的索赔流程 |
-| 财务 | finance | 报价、对账、开票、成本核算 |
+```powershell
+# 1. 克隆仓库
+git clone https://github.com/ivy92888-glitch/global-trade-compliance-playbook.git
+cd global-trade-compliance-playbook
 
-### 🌍 5 个地区
+# 2. 安装依赖
+pip install -r chatbot/requirements.txt
 
-| 地区 | 知识库 | 核心内容 |
-|------|--------|----------|
-| 欧洲 | 4 文件 / 29 KB | 鹿特丹港清、VAT 递延、CBAM 碳关税、EPR 包装法、EUDR 零毁林 |
-| 英国 | 3 文件 / 16 KB | IEN 码、PVA 递延、C88 税金单、DPD 派送、菲利克斯托港 |
-| 美国 | 6 文件 / 55 KB | ACE 清关、ISF 10+2、HTS 编码、FDA 注册、洛杉矶/纽约港 |
-| 加拿大 | 4 文件 / 35 KB | B3 清关单、CBSA 查验、HS 编码、温哥华/多伦多港 |
-| 东南亚 | 3 文件 / 28 KB | 新加坡清关、泰国/印尼/马来西亚、巴生港、汽运专线 |
+# 3. 配置 API Key（硅基流动示例）
+set LLM_BASE_URL=https://api.siliconflow.cn/v1
+set LLM_API_KEY=sk-你的key
+set LLM_MODEL=deepseek-ai/DeepSeek-V3
 
-**总计 102 KB 结构化知识，可直接用于 RAG 检索。**
+# 4. 启动
+run.bat
+```
 
----
+浏览器自动打开 http://localhost:8501
 
-## 🚀 快速开始（5 分钟跑起问答助手）
+### Mac / Linux
 
-### 1. 安装依赖
 ```bash
-pip install streamlit scikit-learn requests numpy
-```
+git clone https://github.com/ivy92888-glitch/global-trade-compliance-playbook.git
+cd global-trade-compliance-playbook
+pip install -r chatbot/requirements.txt
 
-### 2. 配置 LLM（三选一）
+export LLM_BASE_URL=https://api.siliconflow.cn/v1
+export LLM_API_KEY=sk-你的key
+export LLM_MODEL=deepseek-ai/DeepSeek-V3
 
-**方案 A：硅基流动 API（推荐，国内原生）**
-```powershell
-$env:LLM_BASE_URL="https://api.siliconflow.cn/v1"
-$env:LLM_API_KEY="sk-你的Key"
-$env:LLM_MODEL="deepseek-ai/DeepSeek-V3"
-```
-
-**方案 B：本地 Ollama**
-```powershell
-$env:LLM_BASE_URL="http://localhost:11434/v1"
-$env:LLM_API_KEY="ollama"
-$env:LLM_MODEL="qwen2.5:7b"
-```
-
-**方案 C：OpenAI / DeepSeek / 通义**
-改 `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL` 即可，OpenAI-compatible 的端点全都能用。
-
-### 3. 启动
-```powershell
 python -m streamlit run chatbot/app.py --server.headless true
 ```
 
-浏览器自动打开 `http://localhost:8501`，侧边栏选地区，开始提问。
+### 用本地 Ollama（零费用）
+
+```bash
+ollama pull qwen2.5:7b   # 拉中文模型
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_API_KEY=ollama
+export LLM_MODEL=qwen2.5:7b
+python -m streamlit run chatbot/app.py --server.headless true
+```
 
 ---
 
-## 📁 目录结构
+## 文件清单
 
 ```
 global-trade-compliance-playbook/
-├── chatbot/                     # RAG 问答助手代码
-│   ├── app.py                  # Streamlit 前端（地区选择器 + 对话界面）
-│   ├── rag.py                  # TF-IDF 检索 + LLM 调用（5 地区支持）
-│   ├── config.py               # 系统提示词 + 可配置项
-│   └── requirements.txt        # 4 个 pip 包（零 ML 模型下载）
-├── knowledge/                  # 分地区知识库
-│   ├── europe/ (4 文件, 29 KB) # 欧洲清关合规
-│   ├── uk/    (3 文件, 16 KB)  # 英国清关合规
-│   ├── us/    (6 文件, 55 KB)  # 美国清关合规
-│   ├── canada/(4 文件, 35 KB)  # 加拿大清关合规
-│   └── sea/   (3 文件, 28 KB)  # 东南亚跨境汽运
-├── docs/assets/                # Demo 截图
-├── LICENSE                     # MIT
+├── chatbot/                      # RAG 问答助手代码
+│   ├── app.py                    # Streamlit 前端界面
+│   ├── rag.py                    # TF-IDF 检索 + LLM 调用
+│   ├── config.py                 # 常量配置
+│   └── requirements.txt          # 依赖（4 个 pip 包）
+├── knowledge/                    # 知识库（markdown 格式）
+│   ├── europe/                   # 欧洲清关知识（4 文件，29 KB）
+│   ├── uk/                       # 英国清关知识（3 文件，16 KB）
+│   ├── us/                       # 美国清关知识（6 文件，55 KB）
+│   ├── canada/                   # 加拿大清关知识（4 文件，35 KB）
+│   ├── sea/                      # 东南亚知识（3 文件，28 KB）
+│   ├── nodes/                    # 9 大操作节点
+│   │   ├── pre-shipment/         # 港前
+│   │   ├── loading/              # 装柜
+│   │   ├── booking/              # 订舱
+│   │   ├── customs-declaration/  # 报关
+│   │   ├── insurance/            # 投保
+│   │   ├── clearance/            # 清关
+│   │   ├── post-harbor/          # 港后
+│   │   ├── claims/               # 理赔
+│   │   └── finance/              # 财务
+│   └── transport/                # 4 种运输方式
+│       ├── ocean/                # 海运
+│       ├── air/                  # 空运
+│       ├── truck/                # 卡航
+│       └── rail/                 # 铁路
+├── run.bat                       # Windows 一键启动
+├── LICENSE                       # MIT
+└── README.md                     # 你现在看的这份
+```
+
+---
+
+## 技术栈
+
+`Python 3.10+` · `Streamlit` · `scikit-learn TF-IDF` · `requests` · `OpenAI-compatible API`
+
+---
+
+## 合规声明
+
+本项目知识库已完成 clean-room 脱敏重写：
+- 删除所有涉及货代行业灰色操作、规避海关的内容
+- 所有前公司名、内部系统、员工姓名、客户信息已脱敏或删除
+- 所有申报须基于真实属性，不提供任何规避监管的操作建议
+- 如有合规问题或不当内容，欢迎提交 Issue
+
+---
+
+# English
+
+## Global Trade Compliance Playbook
+
+### Cross-border logistics compliance knowledge base + runnable RAG Q&A assistant
+
+You're a new客服 at a cross-border logistics company. A European VAT deferred declaration pops up. An IEN code for UK customs needs to be verified. An ACE entry for a US shipment has errors. A Canadian B3 form is missing fields. Southeast Asia trucking clearance — where do you even start? Not to mention the operational nodes before harbor, loading, booking, clearance, post-harbor dispatch...
+
+Now open a browser window, pick a direction to ask questions, and the system automatically finds relevant sections from hundreds of pages of cross-border logistics compliance manuals.
+
+> The original knowledge base originated from prior employment work and has been rewritten from scratch through clean-room desensitization. 10+ business training references, covering 5 regions, 9 operational nodes, and 4 transport modes.
+
+---
+
+## What It Does
+
+| Feature | Plain-language Summary | Concrete Example |
+|---|---|---|
+| Smart Retrieval | Type a business question, system pinpoints relevant paragraphs from the knowledge base | "Which channel for lamps in Europe?" → Returns 3 clearance + 2 product certification matches |
+| Three-way Scope Picker | Region, operational node, or transport mode — pick one, knowledge loads on demand | Node "清关" = 173 entries; Transport "海运" = 4 entries |
+| RAG Q&A | Retrieved paragraphs sent to LLM → structured, compliant answers | Each answer shows source + relevance score |
+| One-click Launch | Double run.bat on Windows, browser opens automatically | 5-second startup, zero heavy downloads |
+
+---
+
+## Who Uses It
+
+- **Onboarding new hires** at freight forwarders — ask directly instead of flipping through hundreds of PDF pages
+- **Customs officers** looking up standard operating procedures during exception handling
+- **Customer service agents** answering client queries like "What's the fastest clearance channel to the UK?"
+- **Compliance auditors** checking latest regulatory updates (CBAM, Packaging Regulation, EUDR, etc.)
+
+---
+
+## Scope Options (Pick One)
+
+### Regions (5)
+| Region | Key Content |
+|---|---|
+| Europe | VAT deferral, EORI, CBAM, customs broker evaluation, port clearance / bonded warehouse |
+| UK | IEN code, PVA declaration, C88 documents, DPD dispatch, 2026 new regulations |
+| US | ACE/ISF filing, HTS coding, FDA, Los Angeles port |
+| Canada | B3 customs declaration, CBSA, Vancouver port |
+| Southeast Asia | Singapore / Bangkok / Port Klang, cross-border trucking clearance |
+
+### Operational Nodes (9)
+| Node | Content |
+|---|---|
+| Pre-shipment | Goods acceptance, prep and labeling |
+| Loading | Container stuffing, labeling, inventory check |
+| Booking | Voyage selection, booking form preparation, space allocation |
+| Export Customs | Declaration documents, AMS/ISF filing |
+| Insurance | Policy terms, claim coverage |
+| Clearance | Broker selection, inspection response, VAT deferral |
+| Post-harbor | Overseas warehouse systems, final-mile dispatch |
+| Claims | Damage claims, insurance process |
+| Finance | Invoice reconciliation, fee settlement |
+
+### Transport Modes (4)
+| Mode | Content |
+|---|---|
+| Ocean | Shipping alliances, voyage schedules, rollover handling, transit times |
+| Air | Express / economy SOP, chargeable weight, DPD dispatch |
+| Trucking (卡航) | TIR convention, China-Vietnam / China-EU routes, GPS tracking |
+| Rail | China-Europe Railway Express, gauge-change transloading, SMGS waybill |
+
+---
+
+## Quick Start
+
+### Prerequisites
+- Windows / Mac / Linux (Streamlit-compatible)
+- Python 3.10+
+- An LLM API key (SiliconFlow / Ollama / OpenAI all work)
+
+### Windows (Double-click run.bat)
+
+```powershell
+# 1. Clone
+git clone https://github.com/ivy92888-glitch/global-trade-compliance-playbook.git
+cd global-trade-compliance-playbook
+
+# 2. Install dependencies
+pip install -r chatbot/requirements.txt
+
+# 3. Set API key (SiliconFlow example)
+set LLM_BASE_URL=https://api.siliconflow.cn/v1
+set LLM_API_KEY=sk-your-key
+set LLM_MODEL=deepseek-ai/DeepSeek-V3
+
+# 4. Launch
+run.bat
+```
+
+Browser opens http://localhost:8501 automatically.
+
+### Mac / Linux
+
+```bash
+git clone https://github.com/ivy92888-glitch/global-trade-compliance-playbook.git
+cd global-trade-compliance-playbook
+pip install -r chatbot/requirements.txt
+
+export LLM_BASE_URL=https://api.siliconflow.cn/v1
+export LLM_API_KEY=sk-your-key
+export LLM_MODEL=deepseek-ai/DeepSeek-V3
+
+python -m streamlit run chatbot/app.py --server.headless true
+```
+
+### Local Ollama (Free, Zero Cost)
+
+```bash
+ollama pull qwen2.5:7b
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_API_KEY=ollama
+export LLM_MODEL=qwen2.5:7b
+python -m streamlit run chatbot/app.py --server.headless true
+```
+
+---
+
+## File Structure
+
+```
+global-trade-compliance-playbook/
+├── chatbot/                      # RAG Q&A assistant code
+│   ├── app.py                    # Streamlit frontend
+│   ├── rag.py                    # TF-IDF retrieval + LLM caller
+│   ├── config.py                 # Constants
+│   └── requirements.txt          # Dependencies (4 pip packages)
+├── knowledge/                    # Knowledge base (markdown)
+│   ├── europe/                   # EU clearance (4 files, 29 KB)
+│   ├── uk/                       # UK clearance (3 files, 16 KB)
+│   ├── us/                       # US clearance (6 files, 55 KB)
+│   ├── canada/                   # Canada clearance (4 files, 35 KB)
+│   ├── sea/                      # SE Asia (3 files, 28 KB)
+│   ├── nodes/                    # 9 operational nodes
+│   └── transport/                # 4 transport modes
+├── run.bat                       # Windows one-click launcher
+├── LICENSE                       # MIT
 └── README.md
 ```
 
 ---
 
-## 🔧 技术栈
+## Tech Stack
 
-| 组件 | 选型 | 为什么 |
-|------|------|--------|
-| 检索 | sklearn TF-IDF char n-gram | 零 ML 模型下载，秒级响应，领域词汇检索精准 |
-| 向量存储 | 不需要 | 每次启动内存构建矩阵（< 1 秒） |
-| LLM 调用 | OpenAI-compatible API（requests） | Ollama / 硅基流动 / OpenAI / DeepSeek 全部兼容 |
-| 前端 | Streamlit | 30 行代码，聊天界面 + 流式输出 + 来源可追溯 |
-| 依赖 | streamlit + sklearn + requests + numpy | **4 个 pip 包，零下载** |
+`Python 3.10+` · `Streamlit` · `scikit-learn TF-IDF` · `requests` · `OpenAI-compatible API`
 
 ---
 
-## 💡 问答示例
+## Compliance Notice
 
-**切换到「欧洲」：**
-> "CBAM 碳关税怎么算？"
-> → 召回 knowledge/europe/04_europe.md，给出碳密集产品清单、计算公式、2026 政策时间表
-
-**切换到「英国」：**
-> "IEN 码是什么？哪些渠道提供？"
-> → 召回 knowledge/uk/01_uk.md，对比三种模式的 IEN 码支持情况
-
-**切换到「美国」：**
-> "ISF 10+2 是什么？什么时候要申报？"
-> → 召回 knowledge/us/02_us.md，给出 10 项数据要求 + 申报时限
-
-**每个回答底部显示 📚 参考来源（文件名 + 相关度分数），可追溯。**
-
----
-
-## 🛡️ 合规声明
-
-- 本知识库基于公开行业常识 + 脱敏后的内部培训资料整理，**不引用任何前雇主的专有代码或业务文档**
-- 知识库已做开源前合规审查 + 隐私脱敏：删除灰色清关操作、内部系统名、公司/员工姓名、报价、VAT/EORI 号
-- 系统 prompt 明确约束：**不提供任何规避监管、少交税的操作建议**
-- 政策类内容（CBAM/EPR/IEN/ISF）时效性强，使用前请核对官方最新规定
-- MIT License 覆盖作者本人贡献，不构成对任何第三方权利的处分
-
----
-
-## 📖 知识来源
-
-| 地区 | 源文档 | 处理方式 |
-|------|--------|----------|
-| 欧洲 | 6 份内部培训资料（已开源版） | 合规审查 → 隐私脱敏 → 跨文件去重 → 重组为 4 文件 |
-| 英国 | 英国渠道运营文档 | 删灰色清关方案 + 内部薪酬数据 → 脱敏 → 重组为 3 文件 |
-| 美国 | 美国清关合规手册（已开源版） | 合规审查 → 隐私脱敏 → 重组为 6 文件 |
-| 加拿大 | 加拿大清关合规手册（已开源版） | 合规审查 → 隐私脱敏 → 重组为 4 文件 |
-| 东南亚 | 东南亚跨境汽运手册（已开源版） | 合规审查 → 隐私脱敏 → 重组为 3 文件 |
-
----
-
-## 🗺️ 后续计划
-
-- [x] 欧洲知识库
-- [x] 英国知识库
-- [x] 美国知识库
-- [x] 加拿大知识库
-- [x] 东南亚知识库
-- [ ] 每季度更新政策法规
-- [ ] 增加更多国家（澳洲、墨西哥、拉美）
-
----
-
-**作者：** ivy92888-glitch | **License：** MIT
+This knowledge base has undergone a full clean-room desensitization rewrite:
+- All grey-area and customs-evasion operations removed
+- All prior-company names, internal systems, employee names, and client data desensitized or deleted
+- All declarations must be based on actual cargo attributes; no regulatory circumvention guidance provided
+- Issues welcome for any compliance concerns or inappropriate content
