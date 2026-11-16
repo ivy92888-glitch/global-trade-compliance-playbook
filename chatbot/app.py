@@ -79,12 +79,7 @@ with st.sidebar:
 
 # ========== 主区域 ==========
 status = st.session_state.chatbot.get_status()
-scope = f"{status['region']}"
-if status['node'] != "全部节点":
-    scope += f" · {status['node']}"
-
-st.title(f"📦 {scope} 跨境物流助手")
-st.caption(f"知识库 {status['chunks']} 条 · 进出口申报 · VAT 递延 · 查验应对 · 产品认证 · 风控合规")
+st.title("📦 跨境物流助手")
 
 if not st.session_state.messages:
     st.info("👋 你好！我是跨境物流助手。选择地区和节点后，提问更精准；默认覆盖全部 9 个运营节点。")
