@@ -16,9 +16,8 @@ REGIONS = {
     "sea": {"label": "东南亚", "dir": "knowledge/sea", "hint": "东南亚/新加坡/曼谷/巴生港"},
 }
 
-# ========== 9 节点配置 ==========
+# ========== 9 节点配置（无"全部节点"） ==========
 NODES = {
-    "all":               {"label": "全部节点", "dir": None},
     "pre-shipment":      {"label": "港前",     "dir": "knowledge/nodes/pre-shipment"},
     "loading":           {"label": "装柜",     "dir": "knowledge/nodes/loading"},
     "booking":            {"label": "订舱",     "dir": "knowledge/nodes/booking"},
@@ -32,10 +31,10 @@ NODES = {
 
 
 class RAGChatbot:
-    def __init__(self, base_dir=".", region="europe", node="all", top_k=5):
+    def __init__(self, base_dir=".", region="europe", node=None, top_k=5):
         self.base_dir = base_dir
         self.region = region
-        self.node = node
+        self.node = node  # None 表示选地区；非 None 表示选节点（二选一）
         self.top_k = top_k
         self.chunks = []
         self.sources = []
@@ -65,18 +64,19 @@ class RAGChatbot:
         return chunks, sources
 
     def _load_knowledge(self):
-        """同时加载地区 + 节点知识库"""
+        """二选一：选了 node → 只加载节点知识库；否则加载地区知识库"""
         all_chunks, all_sources = [], []
         
-        # 地区知识库
-        region_info = REGIONS.get(self.region, REGIONS["europe"])
-        c, s = self._scan_dir(os.path.join(self.base_dir, region_info["dir"]), region_info["label"])
-        all_chunks.extend(c); all_sources.extend(s)
-        
-        # 节点知识库
-        node_info = NODES.get(self.node, NODES["all"])
-        if node_info["dir"]:
-            c, s = self._scan_dir(os.path.join(self.base_dir, node_info["dir"]), node_info["label"])
+        if self.node and self.node in NODES:
+            # 选了节点 → 只加载节点
+            node_info = NODES[self.node]
+            if node_info["dir"]:
+                c, s = self._scan_dir(os.path.join(self.base_dir, node_info["dir"]), node_info["label"])
+                all_chunks.extend(c); all_sources.extend(s)
+        else:
+            # 选地区
+            region_info = REGIONS.get(self.region, REGIONS["europe"])
+            c, s = self._scan_dir(os.path.join(self.base_dir, region_info["dir"]), region_info["label"])
             all_chunks.extend(c); all_sources.extend(s)
         
         self.chunks = all_chunks
@@ -111,12 +111,13 @@ class RAGChatbot:
             context_parts.append(f"[来源: {source}, 相关度: {score:.2f}]\n{chunk}")
         context = "\n\n---\n\n".join(context_parts) if context_parts else "(知识库未检索到相关内容)"
         
-        # system prompt 同时体现地区 + 节点
-        scope_desc = f"{region_info['label']}方向"
-        if node_info["dir"]:
-            scope_desc += f" · {node_info['label']}环节"
+        # system prompt：节点时用节点语境，地区时用地区语境
+        if self.node and self.node in NODES:
+            scope_desc = f"{NODES[self.node]['label']}环节"
+        else:
+            scope_desc = f"{REGIONS.get(self.region, REGIONS['europe'])['label']}方向"
         
-        system_prompt = f"""你是一位跨境物流合规专家，专注于{scope_desc}的业务知识。
+        system_prompt = f"""你是一位跨境物流专家，专注于{scope_desc}的业务知识。
 请基于以下知识库内容回答用户的跨境物流问题。
 
 要求：
@@ -179,19 +180,16 @@ class RAGChatbot:
             return json.loads(resp.text)["choices"][0]["message"]["content"]
 
     def switch_context(self, region=None, node=None):
-        if region is not None: self.region = region
-        if node is not None: self.node = node
+        """切换时自动二选一：设了 node 就优先用 node"""
+        if node is not None:
+            self.node = node
+        elif region is not None:
+            self.region = region
+            self.node = None  # 选地区就清空节点
         self._load_knowledge()
 
     def get_status(self):
-        region_info = REGIONS.get(self.region, REGIONS["europe"])
-        node_info = NODES.get(self.node, NODES["all"])
-        return {
-            "region": region_info["label"],
-            "node": node_info["label"],
-            "chunks": len(self.chunks),
-            "dir_count": len(set(
-                [region_info["dir"]] + 
-                ([node_info["dir"]] if node_info["dir"] else [])
-            )),
-        }
+        if self.node and self.node in NODES:
+            return {"scope": f"节点：{NODES[self.node]['label']}", "chunks": len(self.chunks)}
+        else:
+            return {"scope": f"地区：{REGIONS.get(self.region, REGIONS['europe'])['label']}", "chunks": len(self.chunks)}
