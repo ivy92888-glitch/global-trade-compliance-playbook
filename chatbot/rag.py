@@ -1,208 +1,182 @@
-"""RAG 管道：加载知识 → TF-IDF 检索 → LLM 生成
-
-轻量级实现，不依赖任何本地 ML 模型。
-检索用 scikit-learn TF-IDF 余弦相似度，对领域强词汇的知识库（如清关合规）效果很好。
+"""
+RAG 检索增强生成模块 — 支持多地区知识库
 """
 import os, re, glob
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import requests
 
-from . import config
+# 地区配置
+REGIONS = {
+    "europe": {"label": "🇪🇺 欧洲清关", "dir": "knowledge/europe", "prompt_suffix": "（欧洲清关语境）"},
+    "uk": {"label": "🇬🇧 英国清关", "dir": "knowledge/uk", "prompt_suffix": "（英国清关语境）"},
+    "us": {"label": "🇺🇸 美国清关", "dir": "knowledge/us", "prompt_suffix": "（美国清关语境）"},
+    "canada": {"label": "🇨🇦 加拿大清关", "dir": "knowledge/canada", "prompt_suffix": "（加拿大清关语境）"},
+    "sea": {"label": "🌏 东南亚清关", "dir": "knowledge/sea", "prompt_suffix": "（东南亚清关语境）"},
+}
+
+# 地区对应的语言/术语偏好
+REGION_HINTS = {
+    "europe": "欧盟 (EU) / MRN / EORI / VAT 递延 / 鹿特丹 / 安特卫普 / CBAM",
+    "uk": "英国 (UK) / IEN / PVA / C88 / DPD / 菲利克斯托 / 南安普顿",
+    "us": "美国 (US) / ACE / ISF / HTS / FDA / 洛杉矶港 / 纽约港",
+    "canada": "加拿大 (CA) / B3 / CBSA / HS / 温哥华 / 多伦多",
+    "sea": "东南亚 (SEA) / 新加坡 / 曼谷 / 雅加达 / 巴生港",
+}
 
 
-# ==================== 加载与切分 ====================
+class RAGChatbot:
+    def __init__(self, base_dir=".", region="europe", top_k=5):
+        self.base_dir = base_dir
+        self.region = region
+        self.top_k = top_k
+        self.chunks = []
+        self.sources = []
+        self.vectorizer = None
+        self.tfidf_matrix = None
+        self._load_knowledge()
 
-def load_knowledge(knowledge_dir=None):
-    """加载 knowledge/ 下所有 .md 文件"""
-    if knowledge_dir is None:
-        knowledge_dir = config.KNOWLEDGE_DIR
-    
-    chunks = []
-    for md_path in sorted(glob.glob(os.path.join(knowledge_dir, "*.md"))):
-        fname = os.path.basename(md_path)
-        with open(md_path, encoding="utf-8") as f:
-            content = f.read()
+    def _load_knowledge(self):
+        """加载指定地区的所有知识文件"""
+        region_info = REGIONS.get(self.region, REGIONS["europe"])
+        kb_dir = os.path.join(self.base_dir, region_info["dir"])
         
-        # 按 H2 / H3 标题切分，每个 section 是一个 chunk
-        sections = re.split(r'\n(?=##)', content)
-        for sec in sections:
-            sec = sec.strip()
-            if len(sec) < 30:
-                continue  # 跳过太短的
-            chunks.append({
-                "text": sec,
-                "source": fname,
-                "title": _extract_section_title(sec),
-            })
-    
-    return chunks
+        if not os.path.exists(kb_dir):
+            self.chunks = ["知识库尚未就绪，敬请期待。"]
+            self.vectorizer = TfidfVectorizer()
+            self.tfidf_matrix = self.vectorizer.fit_transform(self.chunks)
+            return
 
+        files = sorted(glob.glob(os.path.join(kb_dir, "*.md")))
+        self.chunks = []
+        self.sources = []
 
-def _extract_section_title(chunk):
-    """从 chunk 开头提取 section 标题"""
-    first_line = chunk.split("\n")[0].strip()
-    # 去掉 markdown heading 标记
-    title = re.sub(r'^#+\s*', '', first_line)
-    return title[:60] if title else "(无标题)"
+        for fpath in files:
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            fname = os.path.basename(fpath)
+            
+            # 按 ## 标题拆 chunk
+            sections = re.split(r'\n(?=## )', content)
+            for sec in sections:
+                sec = sec.strip()
+                if len(sec) > 30:  # 跳过太短的
+                    self.chunks.append(sec)
+                    self.sources.append(f"{fname}")
 
+        # 构建 TF-IDF
+        if self.chunks:
+            self.vectorizer = TfidfVectorizer(
+                analyzer='char', ngram_range=(2, 4), min_df=1
+            )
+            self.tfidf_matrix = self.vectorizer.fit_transform(self.chunks)
 
-# ==================== 检索 ====================
-
-class Retriever:
-    """TF-IDF 向量检索器"""
-    
-    def __init__(self, chunks):
-        self.chunks = chunks
-        # 对中文 + 英文做分词：unigram + bigram，覆盖中英混合场景
-        self.vectorizer = TfidfVectorizer(
-            analyzer="char_wb",      # char n-gram，不用空格分词
-            ngram_range=(1, 3),      # 1-3 字组合，覆盖 HS 编码、术语等
-            max_features=8000,
-            sublinear_tf=True,       # 次线性 TF，避免长文分数爆炸
-        )
-        # 预先计算所有 chunk 的 TF-IDF 矩阵
-        texts = [c["text"] for c in chunks]
-        self.tfidf_matrix = self.vectorizer.fit_transform(texts)
-    
-    def search(self, query, top_k=None):
-        """检索 top-K 个相关 chunk"""
-        if top_k is None:
-            top_k = config.TOP_K
+    def retrieve(self, query, k=None):
+        """检索 top-k 相关 chunk"""
+        if not self.chunks or self.vectorizer is None:
+            return [], []
         
+        k = k or self.top_k
         query_vec = self.vectorizer.transform([query])
-        scores = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+        sims = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+        top_idx = sims.argsort()[-k:][::-1]
         
-        # 取 top-K
-        top_idx = np.argsort(scores)[::-1][:top_k]
-        
-        results = []
-        for idx in top_idx:
-            if scores[idx] > 0.01:  # 过滤完全不相关的
-                results.append({
-                    "chunk": self.chunks[idx],
-                    "score": float(scores[idx]),
-                })
-        
+        results = [(self.chunks[i], self.sources[i], sims[i]) for i in top_idx if sims[i] > 0.05]
         return results
 
-
-# ==================== LLM 调用 ====================
-
-def build_context(retrieved):
-    """把检索结果拼成 LLM 可读的 context"""
-    if not retrieved:
-        return "（暂无相关知识，可能这个问题不在本知识库覆盖范围内）"
-    
-    parts = []
-    for i, r in enumerate(retrieved, 1):
-        src = r["chunk"]["source"]
-        title = r["chunk"]["title"]
-        text = r["chunk"]["text"]
-        # 截断过长的 chunk
-        if len(text) > 800:
-            text = text[:800] + "…（截断）"
-        parts.append(f"【参考 {i}｜{src} → {title}】\n{text}")
-    
-    return "\n\n".join(parts)
-
-
-def call_llm(messages, base_url=None, api_key=None, model=None):
-    """OpenAI-compatible API 调用（也兼容 Ollama）"""
-    import requests
-    
-    base_url = (base_url or config.LLM_BASE_URL).rstrip("/")
-    api_key = api_key or config.LLM_API_KEY
-    model = model or config.LLM_MODEL
-    
-    url = f"{base_url}/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
-    body = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-    }
-    
-    resp = requests.post(url, headers=headers, json=body, stream=True, timeout=120)
-    if resp.status_code != 200:
-        raise RuntimeError(f"LLM 调用失败 ({resp.status_code}): {resp.text[:500]}")
-    
-    # 流式解析 SSE
-    full_text = ""
-    for line in resp.iter_lines(decode_unicode=True):
-        if not line or not line.startswith("data: "):
-            continue
-        line = line[6:]
-        if line == "[DONE]":
-            break
-        try:
-            import json
-            data = json.loads(line)
-            delta = data.get("choices", [{}])[0].get("delta", {})
-            token = delta.get("content", "")
-            if token:
-                full_text += token
-        except Exception:
-            continue
-    
-    return full_text
-
-
-# ==================== 入口函数 ====================
-
-class CustomsChatbot:
-    """整合 RAG 管道：知识加载 → 检索 → LLM 生成"""
-    
-    def __init__(self, knowledge_dir=None):
-        print("📚 加载知识库...")
-        self.chunks = load_knowledge(knowledge_dir)
-        print(f"   共 {len(self.chunks)} 个知识 chunk")
-        print("🔧 构建 TF-IDF 检索器...")
-        self.retriever = Retriever(self.chunks)
-        print("✅ 就绪")
-    
-    def answer(self, query, history=None, top_k=None):
-        """回答一个问题"""
+    def stream_llm(self, query, retrieved=None, stream=True):
+        """调用 LLM（流式）"""
+        import os
+        
         # 1. 检索
-        retrieved = self.retriever.search(query, top_k=top_k)
+        if retrieved is None:
+            retrieved = self.retrieve(query)
         
-        # 2. 拼消息
-        messages = [
-            {"role": "system", "content": config.SYSTEM_PROMPT},
-        ]
+        # 2. 构建 prompt
+        region_info = REGIONS.get(self.region, REGIONS["europe"])
+        region_hint = REGION_HINTS.get(self.region, "")
         
-        # 历史（最多保留 6 轮）
-        if history:
-            for msg in history[-12:]:
-                messages.append(msg)
+        context_parts = []
+        for i, (chunk, source, score) in enumerate(retrieved):
+            context_parts.append(f"[来源: {source}, 相关度: {score:.2f}]\n{chunk}")
         
-        # 把检索结果作为 system context 注入
-        context = build_context(retrieved)
-        messages.append({
-            "role": "system",
-            "content": f"以下是针对用户问题检索到的参考材料，**严格基于这些材料回答**，不要引入外部知识：\n\n{context}",
-        })
+        context = "\n\n---\n\n".join(context_parts) if context_parts else "(知识库未检索到相关内容，以下为通用合规建议)"
         
-        # 用户问题
-        messages.append({"role": "user", "content": query})
-        
-        # 3. 调 LLM
-        answer = call_llm(messages)
-        
-        return answer, retrieved
+        system_prompt = f"""你是一位跨境清关合规专家，{region_info['label'].replace('🇪🇺 ','').replace('🇬🇧 ','').replace('🇺🇸 ','').replace('🇨🇦 ','').replace('🌏 ','')}方向。
+请基于以下知识库内容回答用户的清关合规问题。
 
+要求：
+1. 优先使用知识库中的信息，确保准确
+2. 如果知识库没有直接答案，基于通用清关合规常识回答，并明确标注"以下为通用建议，具体请以当地海关最新政策为准"
+3. 给出的建议必须合规合法，不提供任何规避海关、少交税的操作建议
+4. 关键合规点（如申报真实、编码准确、认证齐全、追溯期长等）务必强调
+5. 回答结构清晰，分点列出
 
-if __name__ == "__main__":
-    # 命令行测试
-    bot = CustomsChatbot()
-    while True:
-        q = input("\n你: ").strip()
-        if q in ("quit", "exit", ""):
-            break
-        ans, refs = bot.answer(q)
-        print(f"\n助手: {ans}\n")
-        for r in refs:
-            print(f"  📚 [{r['score']:.3f}] {r['chunk']['source']} → {r['chunk']['title']}")
+术语参考：{region_hint}"""
+
+        user_prompt = f"""【知识库内容】
+
+{context}
+
+【用户问题】
+{query}
+
+请根据以上知识库内容，针对用户问题给出合规、准确、结构清晰的回答。"""
+
+        # 3. 调用 LLM
+        base_url = os.environ.get("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
+        api_key = os.environ.get("LLM_API_KEY", "")
+        model = os.environ.get("LLM_MODEL", "deepseek-ai/DeepSeek-V3")
+
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": stream,
+            "max_tokens": 1500,
+            "temperature": 0.3,
+        }
+
+        resp = requests.post(url, headers=headers, json=body, stream=True, timeout=120)
+        if resp.status_code != 200:
+            raise RuntimeError(f"LLM 调用失败 ({resp.status_code}): {resp.text[:500]}")
+
+        # 强制 UTF-8 解码（Windows GBK 兼容）
+        resp.encoding = "utf-8"
+
+        if stream:
+            def gen():
+                buffer = ""
+                for line in resp.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            import json
+                            obj = json.loads(data)
+                            delta = obj.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except Exception:
+                            continue
+            return gen()
+        else:
+            import json
+            return json.loads(resp.text)["choices"][0]["message"]["content"]
+
+    def switch_region(self, region):
+        """切换地区"""
+        self.region = region
+        self._load_knowledge()
