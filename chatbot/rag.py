@@ -1,5 +1,6 @@
 """
-RAG 检索增强生成模块 — 支持 5 地区 × 9 节点 交叉检索
+RAG 检索增强生成模块 — 三选一模式：地区 / 节点 / 运输方式
+知识库体量有限，三选一加载，不同时选
 """
 import os, re, glob
 import numpy as np
@@ -9,14 +10,14 @@ import requests
 
 # ========== 5 地区配置 ==========
 REGIONS = {
-    "europe": {"label": "欧洲", "dir": "knowledge/europe", "hint": "欧盟/EORI/VAT递延/鹿特丹/CBAM"},
-    "uk": {"label": "英国", "dir": "knowledge/uk", "hint": "英国/IEN/PVA/C88/DPD/菲利克斯托"},
-    "us": {"label": "美国", "dir": "knowledge/us", "hint": "美国/ACE/ISF/HTS/FDA/洛杉矶港"},
-    "canada": {"label": "加拿大", "dir": "knowledge/canada", "hint": "加拿大/B3/CBSA/HS/温哥华"},
-    "sea": {"label": "东南亚", "dir": "knowledge/sea", "hint": "东南亚/新加坡/曼谷/巴生港"},
+    "europe": {"label": "欧洲", "dir": "knowledge/europe"},
+    "uk": {"label": "英国", "dir": "knowledge/uk"},
+    "us": {"label": "美国", "dir": "knowledge/us"},
+    "canada": {"label": "加拿大", "dir": "knowledge/canada"},
+    "sea": {"label": "东南亚", "dir": "knowledge/sea"},
 }
 
-# ========== 9 节点配置（无"全部节点"） ==========
+# ========== 9 节点配置 ==========
 NODES = {
     "pre-shipment":      {"label": "港前",     "dir": "knowledge/nodes/pre-shipment"},
     "loading":           {"label": "装柜",     "dir": "knowledge/nodes/loading"},
@@ -29,16 +30,36 @@ NODES = {
     "finance":            {"label": "财务",     "dir": "knowledge/nodes/finance"},
 }
 
+# ========== 4 运输方式配置 ==========
+TRANSPORT = {
+    "ocean":  {"label": "海运", "dir": "knowledge/transport/ocean"},
+    "air":    {"label": "空运", "dir": "knowledge/transport/air"},
+    "truck":  {"label": "卡航", "dir": "knowledge/transport/truck"},
+    "rail":   {"label": "铁路", "dir": "knowledge/transport/rail"},
+}
+
 
 class RAGChatbot:
-    def __init__(self, base_dir=".", region="europe", node=None, top_k=5):
+    def __init__(self, base_dir=".", mode="region", region="europe", node=None, transport=None, top_k=5):
+        """
+        mode: "region" | "node" | "transport" — 三选一，不能同时选
+        """
         self.base_dir = base_dir
-        # 过滤掉已删除的 "all" 等无效节点
-        if node and node in NODES:
+        self.mode = mode
+        
+        if mode == "node" and node and node in NODES:
             self.node = node
+            self.region = None
+            self.transport = None
+        elif mode == "transport" and transport and transport in TRANSPORT:
+            self.node = None
+            self.region = None
+            self.transport = transport
         else:
             self.node = None
-        self.region = region
+            self.transport = None
+            self.region = region if region in REGIONS else "europe"
+        
         self.top_k = top_k
         self.chunks = []
         self.sources = []
@@ -47,7 +68,6 @@ class RAGChatbot:
         self._load_knowledge()
 
     def _scan_dir(self, kb_dir, tag_prefix=""):
-        """扫描一个目录，返回 (chunks, sources)"""
         chunks, sources = [], []
         if not os.path.exists(kb_dir):
             return chunks, sources
@@ -68,17 +88,17 @@ class RAGChatbot:
         return chunks, sources
 
     def _load_knowledge(self):
-        """二选一：选了 node → 只加载节点知识库；否则加载地区知识库"""
         all_chunks, all_sources = [], []
         
-        if self.node and self.node in NODES:
-            # 选了节点 → 只加载节点
-            node_info = NODES[self.node]
-            if node_info["dir"]:
-                c, s = self._scan_dir(os.path.join(self.base_dir, node_info["dir"]), node_info["label"])
-                all_chunks.extend(c); all_sources.extend(s)
+        if self.mode == "node" and self.node and self.node in NODES:
+            info = NODES[self.node]
+            c, s = self._scan_dir(os.path.join(self.base_dir, info["dir"]), info["label"])
+            all_chunks.extend(c); all_sources.extend(s)
+        elif self.mode == "transport" and self.transport and self.transport in TRANSPORT:
+            info = TRANSPORT[self.transport]
+            c, s = self._scan_dir(os.path.join(self.base_dir, info["dir"]), info["label"])
+            all_chunks.extend(c); all_sources.extend(s)
         else:
-            # 选地区
             region_info = REGIONS.get(self.region, REGIONS["europe"])
             c, s = self._scan_dir(os.path.join(self.base_dir, region_info["dir"]), region_info["label"])
             all_chunks.extend(c); all_sources.extend(s)
@@ -95,12 +115,20 @@ class RAGChatbot:
 
     def retrieve(self, query, k=None):
         if not self.chunks or self.vectorizer is None:
-            return [], []
+            return []
         k = k or self.top_k
         query_vec = self.vectorizer.transform([query])
         sims = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
         top_idx = sims.argsort()[-k:][::-1]
         return [(self.chunks[i], self.sources[i], sims[i]) for i in top_idx if sims[i] > 0.05]
+
+    def _get_scope_desc(self):
+        if self.mode == "node" and self.node in NODES:
+            return f"{NODES[self.node]['label']}环节"
+        elif self.mode == "transport" and self.transport in TRANSPORT:
+            return f"{TRANSPORT[self.transport]['label']}运输"
+        else:
+            return f"{REGIONS.get(self.region, REGIONS['europe'])['label']}方向"
 
     def stream_llm(self, query, retrieved=None, stream=True):
         import os, json
@@ -108,15 +136,11 @@ class RAGChatbot:
             retrieved = self.retrieve(query)
         
         context_parts = []
-        for i, (chunk, source, score) in enumerate(retrieved):
+        for chunk, source, score in retrieved:
             context_parts.append(f"[来源: {source}, 相关度: {score:.2f}]\n{chunk}")
         context = "\n\n---\n\n".join(context_parts) if context_parts else "(知识库未检索到相关内容)"
         
-        # system prompt：节点时用节点语境，地区时用地区语境
-        if self.node and self.node in NODES:
-            scope_desc = f"{NODES[self.node]['label']}环节"
-        else:
-            scope_desc = f"{REGIONS.get(self.region, REGIONS['europe'])['label']}方向"
+        scope_desc = self._get_scope_desc()
         
         system_prompt = f"""你是一位跨境物流专家，专注于{scope_desc}的业务知识。
 请基于以下知识库内容回答用户的跨境物流问题。
@@ -180,17 +204,27 @@ class RAGChatbot:
         else:
             return json.loads(resp.text)["choices"][0]["message"]["content"]
 
-    def switch_context(self, region=None, node=None):
-        """切换时自动二选一：设了 node 就优先用 node"""
-        if node is not None:
-            self.node = node
-        elif region is not None:
-            self.region = region
-            self.node = None  # 选地区就清空节点
+    def switch_context(self, mode=None, region=None, node=None, transport=None):
+        if mode is not None:
+            self.mode = mode
+            if mode == "node":
+                self.node = node if node and node in NODES else None
+                self.region = None
+                self.transport = None
+            elif mode == "transport":
+                self.transport = transport if transport and transport in TRANSPORT else None
+                self.node = None
+                self.region = None
+            else:
+                self.region = region if region and region in REGIONS else "europe"
+                self.node = None
+                self.transport = None
         self._load_knowledge()
 
     def get_status(self):
-        if self.node and self.node in NODES:
+        if self.mode == "node" and self.node in NODES:
             return {"scope": f"节点：{NODES[self.node]['label']}", "chunks": len(self.chunks)}
+        elif self.mode == "transport" and self.transport in TRANSPORT:
+            return {"scope": f"运输方式：{TRANSPORT[self.transport]['label']}", "chunks": len(self.chunks)}
         else:
             return {"scope": f"地区：{REGIONS.get(self.region, REGIONS['europe'])['label']}", "chunks": len(self.chunks)}
