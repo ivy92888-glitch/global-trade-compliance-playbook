@@ -2,7 +2,7 @@
 Global Trade Compliance Assistant — 多地区跨境物流合规助手
 
 支持地区：欧洲 / 英国 / 美国 / 加拿大 / 东南亚
-覆盖：清关、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪
+覆盖：进出口申报、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪
 """
 import os, sys, time
 import streamlit as st
@@ -33,13 +33,13 @@ with st.sidebar:
     st.caption("跨境物流合规问答助手")
     
     # 地区选择 —— 删 emoji 图标，只保留中文地区名
-    st.subheader("选择清关地区")
+    st.subheader("选择地区")
     region_labels = [REGIONS[r]["label"].split()[-1] for r in REGIONS]  # 只取最后一个词（欧洲/英国/...）
     region_keys = list(REGIONS.keys())
     current_label = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])["label"].split()[-1]
     
     selected_idx = region_labels.index(current_label) if current_label in region_labels else 0
-    selected_label = st.radio("清关地区", region_labels, index=selected_idx)
+    selected_label = st.radio("地区", region_labels, index=selected_idx)
     selected_region = region_keys[region_labels.index(selected_label)]
     
     if selected_region != st.session_state.chatbot.region:
@@ -79,11 +79,11 @@ region_info = REGIONS.get(st.session_state.chatbot.region, REGIONS["europe"])
 region_label = region_info["label"].split()[-1]  # 只取中文地区名
 
 st.title(f"📦 {region_label} 跨境物流合规助手")
-st.caption(f"知识库 {len(st.session_state.chatbot.chunks)} 条 · 清关合规 · VAT 递延 · 产品认证 · 政策新规 · 查验应对")
+st.caption(f"知识库 {len(st.session_state.chatbot.chunks)} 条 · 进出口申报合规 · VAT 递延 · 产品认证 · 政策新规 · 查验应对")
 
-# 欢迎语 —— 简化，删掉"试试这些问题"卡片
+# 欢迎语 —— 简化
 if not st.session_state.messages:
-    st.info("👋 你好！我是跨境物流合规助手。覆盖清关、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪等环节。")
+    st.info("👋 你好！我是跨境物流合规助手。覆盖进出口申报、VAT 递延、查验应对、产品认证、风控合规、渠道选择、政策追踪等环节。")
 
 # ========== 对话历史 ==========
 for msg in st.session_state.messages:
