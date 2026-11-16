@@ -13,10 +13,11 @@ st.set_page_config(page_title="Global Trade Assistant", page_icon="📦", layout
 def get_base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Force rebuild every load to filter stale state
-st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), mode="region", region="europe")
-st.session_state._prev_mode = "region"
-st.session_state._prev_key = "europe"
+# Initialize chatbot only once (on first load)
+if "chatbot" not in st.session_state:
+    st.session_state.chatbot = RAGChatbot(base_dir=get_base_dir(), mode="region", region="europe")
+    st.session_state._prev_mode = "region"
+    st.session_state._prev_key = "europe"
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
